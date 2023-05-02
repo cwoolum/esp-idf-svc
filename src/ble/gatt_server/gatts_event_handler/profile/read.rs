@@ -1,9 +1,22 @@
-use ::log::debug;
+use core::cmp::min;
+use std::collections::HashMap;
 
-use esp_idf_sys::*;
+use ::log::debug;
 
 use crate::ble::gatt_server::Profile;
 use crate::ble::utilities::AttributeControl;
+use crate::private::mutex::{Mutex, RawMutex};
+use esp_idf_sys::*;
+
+type Singleton<T> = Mutex<Option<Box<T>>>;
+
+/// The GATT server singleton.
+pub(crate) static MESSAGE_CACHE: Singleton<HashMap<u16, Vec<u8>>> =
+    Mutex::wrap(RawMutex::new(), None);
+
+const RESPONSE_LENGTH: usize = 600;
+// TODO: Pull current MTU size from MTU update events
+const MAX_CHUNK_SIZE: u16 = 22;
 
 impl Profile {
     pub(crate) fn on_read(
@@ -28,18 +41,53 @@ impl Profile {
                         if let AttributeControl::ResponseByApp(callback) =
                             &characteristic.read().unwrap().control
                         {
-                            let value = callback(param);
+                            let value;
+
+                            let mut locked_cache = MESSAGE_CACHE.lock();
+                            let locked_cache = locked_cache.as_mut().unwrap();
+
+                            let cached_message = locked_cache.get(&param.handle);
+
+                            match cached_message {
+                                Some(message) if param.offset > 0 => {
+                                    value = message.to_vec();
+                                }
+                                _ => {
+                                    value = callback(param);
+                                }
+                            }
+
+                            if let None = cached_message {
+                                if value.len() > MAX_CHUNK_SIZE.into() {
+                                    locked_cache.insert(param.handle, value.to_vec());
+                                }
+                            }
 
                             // Extend the response to the maximum length.
-                            let mut response = [0u8; 600];
-                            response[..value.len()].copy_from_slice(&value);
+                            let mut response = [0u8; RESPONSE_LENGTH];
+                            let possible_max =
+                                min(value.len(), (param.offset + MAX_CHUNK_SIZE).into());
+                            let sub_string = &value[param.offset.into()..possible_max.into()];
+
+                            // Remove from the cache once we don't need chunking anymore.
+                            if sub_string.len() < MAX_CHUNK_SIZE.into() {
+                                println!(
+                                    "Removing from cache {:?} {:?}",
+                                    param.offset, param.handle
+                                );
+                                locked_cache.remove(&param.handle);
+                            }
+
+                            drop(locked_cache);
+
+                            response[..sub_string.len()].copy_from_slice(sub_string);
 
                             let mut esp_rsp = esp_gatt_rsp_t {
                                 attr_value: esp_gatt_value_t {
                                     auth_req: 0,
                                     handle: param.handle,
-                                    len: value.len() as u16,
-                                    offset: 0,
+                                    len: min(value.len() as u16 - param.offset, MAX_CHUNK_SIZE),
+                                    offset: param.offset,
                                     value: response,
                                 },
                             };

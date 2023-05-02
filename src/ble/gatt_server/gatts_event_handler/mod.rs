@@ -1,4 +1,4 @@
-mod profile;
+pub(crate) mod profile;
 mod server;
 
 use ::log::{debug, warn};

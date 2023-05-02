@@ -15,7 +15,7 @@ mod gatts_event_handler;
 
 use alloc::{boxed::Box, sync::Arc};
 use heapless::FnvIndexSet;
-use std::sync::RwLock;
+use std::{collections::HashMap, sync::RwLock};
 
 use ::log::{info, warn};
 
@@ -30,6 +30,8 @@ pub use characteristic::Characteristic;
 pub use descriptor::Descriptor;
 pub use profile::Profile;
 pub use service::Service;
+
+use self::gatts_event_handler::profile::read::MESSAGE_CACHE;
 
 type Singleton<T> = Mutex<Option<Box<T>>>;
 
@@ -57,6 +59,8 @@ unsafe impl Send for GattServer {}
 ///
 /// Must be called before the GATT server usage.
 pub fn init() {
+    *MESSAGE_CACHE.lock() = Some(Box::new(HashMap::new()));
+
     *GLOBAL_GATT_SERVER.lock() = Some(Box::new(GattServer {
         profiles: Vec::new(),
         started: false,
@@ -282,6 +286,8 @@ impl GattServer {
             cca_thresh: CONFIG_BT_CTRL_HW_CCA_VAL as u8,
             #[cfg(any(esp_idf_version = "5.0", esp_idf_version = "5.1"))]
             scan_backoff_upperlimitmax: CONFIG_BT_CTRL_SCAN_BACKOFF_UPPERLIMITMAX as u16,
+            #[cfg(any(esp_idf_version = "4.4"))]
+            scan_backoff_upperlimitmax: BT_CTRL_SCAN_BACKOFF_UPPERLIMITMAX as u16,
             #[cfg(any(esp_idf_version = "5.0", esp_idf_version = "5.1"))]
             dup_list_refresh_period: CONFIG_DUPL_SCAN_CACHE_REFRESH_PERIOD as u16,
             #[cfg(esp_idf_version = "5.1")]
