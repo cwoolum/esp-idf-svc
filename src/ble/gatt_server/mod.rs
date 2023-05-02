@@ -36,7 +36,7 @@ use self::gatts_event_handler::profile::read::MESSAGE_CACHE;
 type Singleton<T> = Mutex<Option<Box<T>>>;
 
 /// The GATT server singleton.
-pub static GLOBAL_GATT_SERVER: Singleton<GattServer> = Mutex::wrap(RawMutex::new(), None);
+static GLOBAL_GATT_SERVER: Singleton<GattServer> = Mutex::wrap(RawMutex::new(), None);
 
 /// Represents a GATT server.
 ///
@@ -58,10 +58,10 @@ unsafe impl Send for GattServer {}
 /// The GATT server singleton initialization.
 ///
 /// Must be called before the GATT server usage.
-pub fn init() {
+pub fn init(server_fn: impl FnOnce(&mut GattServer) -> ()) {
     *MESSAGE_CACHE.lock() = Some(Box::new(HashMap::new()));
 
-    *GLOBAL_GATT_SERVER.lock() = Some(Box::new(GattServer {
+    let mut server = GattServer {
         profiles: Vec::new(),
         started: false,
         advertisement_parameters: esp_ble_adv_params_t {
@@ -106,7 +106,11 @@ pub fn init() {
         advertisement_configured: false,
         device_name: "ESP32".to_string(),
         active_connections: FnvIndexSet::new(),
-    }));
+    };
+
+    server_fn(&mut server);
+
+    *GLOBAL_GATT_SERVER.lock() = Some(Box::new(server))
 }
 
 impl GattServer {

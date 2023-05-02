@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use esp_idf_svc::{
     ble::{
         self,
-        gatt_server::{Characteristic, Profile, Service, GLOBAL_GATT_SERVER},
+        gatt_server::{init, Characteristic, Profile, Service},
         utilities::{AttributePermissions, BleUuid, CharacteristicProperties},
     },
     nvs::{EspDefaultNvs, EspDefaultNvsPartition},
@@ -103,15 +103,14 @@ fn main() {
         .service(&service)
         .build();
 
-    match &mut *GLOBAL_GATT_SERVER.lock() {
-        Some(gatt_server) => gatt_server
+    init(move |gatt_server| {
+        return gatt_server
             .profile(profile)
             .device_name("ESP32-GATT-Server")
             .appearance(ble::utilities::Appearance::WristWornPulseOximeter)
             .advertise_service(&service)
-            .start(),
-        None => panic!("GATT server not initialized"),
-    };
+            .start();
+    });
 
     std::thread::spawn(move || {
         let mut counter = 0;
